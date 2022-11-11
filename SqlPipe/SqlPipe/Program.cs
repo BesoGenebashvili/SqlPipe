@@ -2,6 +2,12 @@
 using System.Data.SqlClient;
 using System.Transactions;
 
+var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
+
+var sql = "INSERT INTO dbo.Customers (Name, Age) VALUES ('Beso', 23)";
+
+executor.Text(sql);
+
 Console.WriteLine("Hello, World!");
 
 public sealed class Disposable<T> where T : IDisposable
@@ -116,4 +122,21 @@ public sealed class Executor
                       }
                       catch { return false; }
                   });
+}
+
+public abstract record Clause
+{
+    public sealed record Select(Clause? Predecessor, params string[] Values) : Clause;
+    public sealed record Top(Clause Predecessor, int Value) : Clause;
+    public sealed record From(Clause Predecessor, string Value) : Clause;
+    public sealed record Where(Clause Predecessor, string Value) : Clause;
+    public sealed record OrderBy(Clause Predecessor, string Value) : Clause;
+    public sealed record InnerJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record LeftJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record RightJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record FullOuterJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record On(Clause Predecessor, string Value) : Clause;
+    public sealed record GroupBy(Clause Predecessor, string Value) : Clause;
+    public sealed record Having(Clause Predecessor, string Value) : Clause;
+    public sealed record Union(Clause Predecessor) : Clause;
 }
