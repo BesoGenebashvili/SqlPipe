@@ -2,14 +2,40 @@
 using System.Data.SqlClient;
 using System.Transactions;
 using static Clause;
+using static Extensions;
 
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
-var sql = "INSERT INTO dbo.Customers (Name, Age) VALUES ('Beso', 23)";
+var sql = SELECT("C.Id as CustomerId",
+                 "C.Age as CustomerAge",
+                 "L.Amount as LoanAmount",
+                 "L.TermStart as LoanTermStart",
+                 "L.TermEnd as LoanTermEnd")
+              .FROM("dbo.Customers as C")
+              .INNER_JOIN("dbo.Loans as L")
+              .ON("C.Id == L.CustomerId")
+              .WHERE("C.Age >= 18")
+              .ORDER_BY("L.Amount")
+              .ToPrettySql();
 
-executor.Text(sql);
+var xs = executor.QueryList(sql, Customer.DataReader);
 
 Console.WriteLine("Hello, World!");
+
+public sealed record Customer(
+    int Id,
+    int Age,
+    decimal LoanAmount,
+    DateOnly LoanTermStart,
+    DateOnly LoanTermEnd)
+{
+    public static Customer DataReader(IDataReader dataReader) =>
+        new(dataReader.GetInt32(dataReader.GetOrdinal("CustomerId")),
+            dataReader.GetInt32(dataReader.GetOrdinal("CustomerAge")),
+            dataReader.GetDecimal(dataReader.GetOrdinal("LoanAmount")),
+            DateOnly.FromDateTime(dataReader.GetDateTime(dataReader.GetOrdinal("LoanTermStart"))),
+            DateOnly.FromDateTime(dataReader.GetDateTime(dataReader.GetOrdinal("LoanTermEnd"))));
+}
 
 public sealed class Disposable<T> where T : IDisposable
 {
@@ -179,7 +205,7 @@ public static class Extensions
     public static string ToSql(this Clause self) => self switch
     {
         Select(null, { Length: 0 }) => "SELECT *",
-        Select(null, var xs) => $"SELECT {string.Join(',', xs)}",
+        Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
         Select(var p, { Length: 0 }) => p.ToSql() + " SELECT *",
         Select(var p, var xs) => p.ToSql() + $" SELECT {string.Join(',', xs)}",
         Top(var p, var v) => p.ToSql().AppendAfter("SELECT", $" TOP ({v})"),
@@ -200,11 +226,11 @@ public static class Extensions
     public static string ToPrettySql(this Clause self) => self switch
     {
         Select(null, { Length: 0 }) => "SELECT *",
-        Select(null, var xs) => $"SELECT {string.Join(',', xs)}",
+        Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
         Select(var p, { Length: 0 }) => p.ToPrettySql() + "\nSELECT *",
         Select(var p, var xs) => p.ToPrettySql() + $"\nSELECT {string.Join(',', xs)}",
         Top(var p, var v) => p.ToPrettySql().AppendAfter("\nSELECT", $" TOP ({v})"),
-        From(var p, var v) => p.ToPrettySql() + $"\nFROM {v}",
+        From(var p, var v) => p.ToPrettySql() + $" FROM {v}",
         Where(var p, var v) => p.ToPrettySql() + $"\nWHERE {v}",
         OrderBy(var p, var v) => p.ToPrettySql() + $"\nORDER BY {v}",
         InnerJoin(var p, var v) => p.ToPrettySql() + $"\nINNER JOIN {v}",
@@ -218,15 +244,6 @@ public static class Extensions
         _ => throw new NotImplementedException(nameof(self))
     };
 
-    public static string ToPrettySql2(this Clause self)
-    {
-        var keywords = new[] { "SELECT", "TOP", "FROM", "WHERE", "ORDER BY", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL OUTER JOIN", "ON", "GROUP BY", "UNION" };
-
-        return keywords.Aggregate(
-            self.ToSql(),
-            (acc, item) => acc.Contains(item) ? acc.Replace(item, $"\n{item}") : acc);
-    }
-
-    public static string AppendAfter(this string self, string after, string value) => 
+    private static string AppendAfter(this string self, string after, string value) =>
         self.Replace(after, after + value);
 }
