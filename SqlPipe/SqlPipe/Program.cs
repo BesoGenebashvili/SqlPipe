@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using System.Data.SqlClient;
+using System.Runtime.CompilerServices;
 using System.Transactions;
 using static Clause;
 using static Extensions;
@@ -22,7 +23,7 @@ var sql = SELECT("C.Id as CustomerId",
 
 Console.WriteLine(sql);
 
-var xs = executor.QueryList(sql, Customer.DataReader);
+var xs = executor.Query(sql, Customer.FromDataRecord);
 
 Console.WriteLine("Hello, World!");
 
@@ -33,12 +34,12 @@ public sealed record Customer(
     DateOnly LoanTermStart,
     DateOnly LoanTermEnd)
 {
-    public static Customer DataReader(IDataReader dataReader) =>
-        new(dataReader.GetValueAs<int>("CustomerId"),
-            dataReader.GetValueAsNullable<int>("CustomerAge"),
-            dataReader.GetValueAs<decimal>("LoanAmount"),
-            dataReader.GetValueAs<DateOnly>("LoanTermStart"),
-            dataReader.GetValueAs<DateOnly>("LoanTermEnd"));
+    public static Customer FromDataRecord(IDataRecord dataRecord) =>
+        new(dataRecord.GetValueAs<int>("CustomerId"),
+            dataRecord.GetValueAsNullable<int>("CustomerAge"),
+            dataRecord.GetValueAs<decimal>("LoanAmount"),
+            dataRecord.GetValueAs<DateOnly>("LoanTermStart"),
+            dataRecord.GetValueAs<DateOnly>("LoanTermEnd"));
 }
 
 public sealed class Disposable<T> where T : IDisposable
@@ -96,23 +97,11 @@ public sealed class Executor
                                       .Use(c => Disposable.Of(() => c.ExecuteReader(commandBehavior))
                                                           .Use(r => r.Read() ? map(r) : default)));
 
-    public IList<TResult>? QueryList<TResult>(string sql, Func<IDataReader, TResult> map)
-    {
-        IList<TResult>? ListReader(IDataReader reader)
-        {
-            var xs = new List<TResult>();
-
-            do xs.Add(map(reader));
-            while (reader.Read());
-
-            return xs;
-        }
-
-        return Query(sql, ListReader, CommandBehavior.Default);
-    }
-
-    public TResult? QuerySingle<TResult>(string sql, Func<IDataReader, TResult> map) =>
+    public TResult? QuerySingle<TResult>(string sql, Func<IDataRecord, TResult> map) =>
         Query(sql, map, CommandBehavior.SingleRow);
+
+    public IEnumerable<TResult>? Query<TResult>(string sql, Func<IDataRecord, TResult> map) =>
+        Query(sql, r => r.AsEnumerable().Select(map), CommandBehavior.Default);
 
     public bool Procedure(string name, params SqlParameter[] sqlParameters) =>
         Disposable.Of(ResolveConnection)
@@ -257,7 +246,13 @@ public static class Extensions
 
     #endregion
 
-    #region DataReader
+    #region IDataReader, IDataRecord
+
+    public static IEnumerable<IDataRecord> AsEnumerable(this IDataReader self)
+    {
+        while (self.Read())
+            yield return self;
+    }
 
     public static T GetValueAs<T>(this IDataRecord self, string columnName) =>
         (T)self.GetValue(self.GetOrdinal(columnName));
