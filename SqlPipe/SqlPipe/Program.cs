@@ -4,6 +4,8 @@ using System.Transactions;
 using static Clause;
 using static Extensions;
 
+#nullable enable
+
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
 var sql = SELECT("C.Id as CustomerId",
@@ -16,7 +18,9 @@ var sql = SELECT("C.Id as CustomerId",
               .ON("C.Id == L.CustomerId")
               .WHERE("C.Age >= 18")
               .ORDER_BY("L.Amount")
-              .ToPrettySql();
+              .ToSql();
+
+Console.WriteLine(sql);
 
 var xs = executor.QueryList(sql, Customer.DataReader);
 
@@ -24,17 +28,17 @@ Console.WriteLine("Hello, World!");
 
 public sealed record Customer(
     int Id,
-    int Age,
+    int? Age,
     decimal LoanAmount,
     DateOnly LoanTermStart,
     DateOnly LoanTermEnd)
 {
     public static Customer DataReader(IDataReader dataReader) =>
-        new(dataReader.GetInt32(dataReader.GetOrdinal("CustomerId")),
-            dataReader.GetInt32(dataReader.GetOrdinal("CustomerAge")),
-            dataReader.GetDecimal(dataReader.GetOrdinal("LoanAmount")),
-            DateOnly.FromDateTime(dataReader.GetDateTime(dataReader.GetOrdinal("LoanTermStart"))),
-            DateOnly.FromDateTime(dataReader.GetDateTime(dataReader.GetOrdinal("LoanTermEnd"))));
+        new(dataReader.GetValueAs<int>("CustomerId"),
+            dataReader.GetValueAsNullable<int>("CustomerAge"),
+            dataReader.GetValueAs<decimal>("LoanAmount"),
+            dataReader.GetValueAs<DateOnly>("LoanTermStart"),
+            dataReader.GetValueAs<DateOnly>("LoanTermEnd"));
 }
 
 public sealed class Disposable<T> where T : IDisposable
@@ -140,7 +144,6 @@ public sealed class Executor
                   {
                       try
                       {
-
                           action(this);
 
                           t.Complete();
@@ -170,6 +173,8 @@ public abstract record Clause
 
 public static class Extensions
 {
+    #region Clause
+
     public static Select SELECT(params string[] values) => new(null, values);
     public static Select SELECT(this Union self, params string[] values) => new(self, values);
     public static From FROM(this Select self, string value) => new(self, value);
@@ -246,4 +251,21 @@ public static class Extensions
 
     private static string AppendAfter(this string self, string after, string value) =>
         self.Replace(after, after + value);
+
+    public static T? Get<T>(this IDataReader self, string name) where T : struct =>
+        (T)self.GetValue(self.GetOrdinal(name));
+
+    #endregion
+
+    #region DataReader
+
+    public static T GetValueAs<T>(this IDataRecord self, string columnName) =>
+        (T)self.GetValue(self.GetOrdinal(columnName));
+
+    public static T? GetValueAsNullable<T>(this IDataRecord self, string columnName) =>
+        self.IsDBNull(self.GetOrdinal(columnName))
+            ? default
+            : (T?)self.GetValue(self.GetOrdinal(columnName));
+
+    #endregion
 }
