@@ -1,46 +1,16 @@
 ﻿using System.Data;
 using System.Data.SqlClient;
+using System.Linq;
+using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Transactions;
 using static Clause;
 using static Extensions;
 
 #nullable enable
 
-var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
-
-var sql = SELECT("C.Id as CustomerId",
-                 "C.Age as CustomerAge",
-                 "L.Amount as LoanAmount",
-                 "L.TermStart as LoanTermStart",
-                 "L.TermEnd as LoanTermEnd")
-              .FROM("dbo.Customers as C")
-              .INNER_JOIN("dbo.Loans as L")
-              .ON("C.Id == L.CustomerId")
-              .WHERE("C.Age >= 18")
-              .ORDER_BY("L.Amount")
-              .ToSql();
-
-Console.WriteLine(sql);
-
-var xs = executor.Query(sql, Customer.FromDataRecord);
-
 Console.WriteLine("Hello, World!");
-
-public sealed record Customer(
-    int Id,
-    int? Age,
-    decimal LoanAmount,
-    DateOnly LoanTermStart,
-    DateOnly LoanTermEnd)
-{
-    public static Customer FromDataRecord(IDataRecord dataRecord) =>
-        new(dataRecord.GetValueAs<int>("CustomerId"),
-            dataRecord.GetValueAsNullable<int>("CustomerAge"),
-            dataRecord.GetValueAs<decimal>("LoanAmount"),
-            dataRecord.GetValueAs<DateOnly>("LoanTermStart"),
-            dataRecord.GetValueAs<DateOnly>("LoanTermEnd"));
-}
 
 public sealed class Disposable<T> where T : IDisposable
 {
@@ -100,8 +70,12 @@ public sealed class Executor
     public TResult? QuerySingle<TResult>(string sql, Func<IDataRecord, TResult> map) =>
         Query(sql, map, CommandBehavior.SingleRow);
 
-    public IEnumerable<TResult>? Query<TResult>(string sql, Func<IDataRecord, TResult> map) =>
-        Query(sql, r => r.AsEnumerable().Select(map), CommandBehavior.Default);
+    public IList<TResult>? Query<TResult>(string sql, Func<IDataRecord, TResult> map) =>
+        Query(sql,
+              r => r.AsEnumerable()
+                    .Select(map)
+                    .ToList(),
+              CommandBehavior.Default);
 
     public bool Procedure(string name, params SqlParameter[] sqlParameters) =>
         Disposable.Of(ResolveConnection)
@@ -162,6 +136,26 @@ public abstract record Clause
 
 public static class Extensions
 {
+    #region Executor
+
+    public static bool INSERT_INTO(
+        this Executor self,
+        string tableName,
+        params SqlParameter[] sqlParameters)
+    {
+        var sqlBuilder = new StringBuilder($"INSERT INTO {tableName} ")
+            .Append($"({string.Join(',', sqlParameters.Select(p => p.ParameterName))}) ");
+
+        sqlParameters = Array.ConvertAll(sqlParameters, p => { p.ParameterName = '@' + p.ParameterName; return p; });
+
+        var sql = sqlBuilder.Append($"VALUES ({string.Join(',', sqlParameters.Select(p => p.ParameterName))})")
+                            .ToString();
+
+        return self.Text(sql, sqlParameters);
+    }
+
+    #endregion
+
     #region Clause
 
     public static Select SELECT(params string[] values) => new(null, values);
@@ -238,11 +232,8 @@ public static class Extensions
         _ => throw new NotImplementedException(nameof(self))
     };
 
-    private static string AppendAfter(this string self, string after, string value) =>
+    public static string AppendAfter(this string self, string after, string value) =>
         self.Replace(after, after + value);
-
-    public static T? Get<T>(this IDataReader self, string name) where T : struct =>
-        (T)self.GetValue(self.GetOrdinal(name));
 
     #endregion
 
