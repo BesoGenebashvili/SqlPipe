@@ -1,14 +1,14 @@
 ﻿using System.Data;
 using System.Data.SqlClient;
-using System.Linq;
-using System.Reflection.PortableExecutable;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Transactions;
 using static Clause;
 using static Extensions;
 
 #nullable enable
+
+var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
+
 
 Console.WriteLine("Hello, World!");
 
@@ -153,6 +153,23 @@ public static class Extensions
 
         return self.Text(sql, sqlParameters);
     }
+
+    public static bool UPDATE(
+        this Executor self,
+        string tableName,
+        SqlParameter[] sqlParameters,
+        string where) =>
+        self.Text(
+            $"UPDATE {tableName} SET {string.Join(',', sqlParameters.Select(p => $"{p.ParameterName} = @{p.ParameterName}"))} WHERE {where}",
+            Array.ConvertAll(
+                sqlParameters,
+                p => { p.ParameterName = '@' + p.ParameterName; return p; }));
+
+    public static bool DELETE_FROM(
+        this Executor self,
+        string tableName,
+        string where) =>
+        self.Text($"DELETE FROM {tableName} WHERE {where}");
 
     #endregion
 
