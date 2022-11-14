@@ -9,7 +9,7 @@ using static Extensions;
 
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
-var x = SELECT(
+var sql = SELECT(
             "C.ID as CustomerId",
             "L.ID as LoanId",
             "L.AMOUNT as LoanAmount",
@@ -17,30 +17,35 @@ var x = SELECT(
           .FROM("dbo.CLIENTS as C")
           .INNER_JOIN("dbo.LOANS as L")
           .ON("C.ID = L.CLIENT_ID")
-          .WHERE("C.ID = 4")
+          .WHERE("C.ID = @id")
           .ToSql()
           .Tap();
 
 var clients = executor.QuerySingle(
-    x,
-    r => new
-    {
-        Id = r.GetValueAs<int>("CustomerId"),
-        LoanId = r.GetValueAs<int>("LoanId"),
-        LoanAmount = r.GetValueAs<decimal>("LoanAmount"),
-        Pmt = r.GetValueAsNullable<decimal>("LoanPmt")
-    });
+    sql,
+    new SqlParameter[] { new SqlParameter("@id", 2) },
+    r => new Client(
+        r.GetValueAs<int>("CustomerId"),
+        r.GetValueAs<int>("LoanId"),
+        r.GetValueAs<decimal>("LoanAmount"),
+        r.GetValueAsNullable<decimal>("LoanPmt")));
 
 Console.WriteLine(string.Join('\n', clients));
+
+record Client(
+    int Id,
+    int LoanId,
+    decimal LoanAmount,
+    decimal? Pmt);
 
 //executor.INSERT_INTO(
 //    "dbo.LOANS",
 //    new SqlParameter[]
 //    {
-//        new("CLIENT_ID", 4),
-//        new("AMOUNT", 300m),
-//        new("TERM_BEGIN", new DateTime(2022, 1, 1)),
-//        new("TERM_END", new DateTime(2022, 6, 1))
+//        new("CLIENT_ID", 2),
+//        new("AMOUNT", 5000m),
+//        new("TERM_BEGIN", new DateTime(2022, 6, 1)),
+//        new("TERM_END", new DateTime(2022, 10, 1))
 //    });
 
 //var clients = executor.Query(
@@ -64,7 +69,7 @@ Console.WriteLine(string.Join('\n', clients));
 //    "ID = 6");
 
 
-Console.WriteLine("Hello, World!");
+//Console.WriteLine("Hello, World!");
 
 public sealed class Disposable<T> where T : IDisposable
 {
@@ -115,47 +120,63 @@ public sealed class Executor
     private static IDbCommand CreateCommand(IDbConnection connection, string cmd) =>
         new SqlCommand(cmd, connection as SqlConnection);
 
-    private TResult? Query<TResult>(string sql, Func<IDataReader, TResult> map, CommandBehavior commandBehavior) =>
+    private bool ExecuteNonQuery(
+        string cmd,
+        CommandType commandType,
+        SqlParameter[] sqlParameters) =>
         Disposable.Of(ResolveConnection)
-                  .Use(c => Disposable.Of(() => CreateCommand(c, sql))
-                                      .Use(c => Disposable.Of(() => c.ExecuteReader(commandBehavior))
-                                                          .Use(map)));
+                  .Use(c => Disposable.Of(() => CreateCommand(c, cmd))
+                                      .Use(c =>
+                                      {
+                                          c.CommandType = commandType;
 
-    public TResult? QuerySingle<TResult>(string sql, Func<IDataRecord, TResult> map) =>
-        Query(sql, 
-              r => r.Read() ? map(r) : default, 
-              CommandBehavior.SingleRow);
+                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
 
-    public IList<TResult>? Query<TResult>(string sql, Func<IDataRecord, TResult> map) =>
-        Query(sql,
-              r => r.AsEnumerable()
-                    .Select(map)
-                    .ToList(),
-              CommandBehavior.Default);
+                                          return c.ExecuteNonQuery() > 0;
+                                      }));
+
+    private TResult? ExecuteQuery<TResult>(
+        string cmd,
+        CommandBehavior commandBehavior,
+        SqlParameter[] sqlParameters,
+        Func<IDataReader, TResult?> map) =>
+        Disposable.Of(ResolveConnection)
+                  .Use(c => Disposable.Of(() => CreateCommand(c, cmd))
+                                      .Use(c =>
+                                      {
+                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
+
+                                          return Disposable.Of(() => c.ExecuteReader(commandBehavior))
+                                                           .Use(map);
+                                      }));
+
+    public TResult? QuerySingle<TResult>(
+        string sql,
+        SqlParameter[] sqlParameters,
+        Func<IDataRecord, TResult> map) =>
+        ExecuteQuery(
+            sql,
+            CommandBehavior.SingleRow,
+            sqlParameters,
+            r => r.Read() ? map(r) : default);
+
+    public IList<TResult>? Query<TResult>(
+        string sql,
+        SqlParameter[] sqlParameters,
+        Func<IDataRecord, TResult> map) =>
+        ExecuteQuery(
+            sql,
+            CommandBehavior.Default,
+            sqlParameters,
+            r => r.AsEnumerable()
+                  .Select(map)
+                  .ToList());
 
     public bool Procedure(string name, params SqlParameter[] sqlParameters) =>
-        Disposable.Of(ResolveConnection)
-                  .Use(c => Disposable.Of(() => CreateCommand(c, name))
-                                      .Use(c =>
-                                      {
-                                          c.CommandType = CommandType.StoredProcedure;
-
-                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
-
-                                          return c.ExecuteNonQuery() > 0;
-                                      }));
+        ExecuteNonQuery(name, CommandType.StoredProcedure, sqlParameters);
 
     public bool Text(string sql, params SqlParameter[] sqlParameters) =>
-        Disposable.Of(ResolveConnection)
-                  .Use(c => Disposable.Of(() => CreateCommand(c, sql))
-                                      .Use(c =>
-                                      {
-                                          c.CommandType = CommandType.Text;
-
-                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
-
-                                          return c.ExecuteNonQuery() > 0;
-                                      }));
+        ExecuteNonQuery(sql, CommandType.Text, sqlParameters);
 
     public bool Transaction(Action<Executor> action) =>
         Disposable.Of(() => new TransactionScope())
@@ -212,6 +233,15 @@ public static class LessUsableExtensions
         Union(var p) => p.ToPrettySql() + $"\nUNION",
         _ => throw new NotImplementedException(nameof(self))
     };
+
+    public static string ToPrettySql2(this Clause self)
+    {
+        var keywords = new[] { "FROM", "WHERE", "ORDER BY", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL OUTER JOIN", "ON", "GROUP BY", "UNION" };
+
+        return keywords.Aggregate(
+            self.ToSql(),
+            (acc, item) => acc.Contains(item) ? acc.Replace(item, $"\n{item}") : acc);
+    }
 
     public static string Tap(this string self)
     {
@@ -327,7 +357,7 @@ public static class Extensions
     public static T GetValueAs<T>(this IDataRecord self, string columnName) =>
         (T)self.GetValue(self.GetOrdinal(columnName));
 
-    public static T? GetValueAsNullable<T>(this IDataRecord self, string columnName) =>
+    public static T? GetValueAsNullable<T>(this IDataRecord self, string columnName) where T : struct =>
         self.IsDBNull(self.GetOrdinal(columnName))
             ? default
             : (T?)self.GetValue(self.GetOrdinal(columnName));
