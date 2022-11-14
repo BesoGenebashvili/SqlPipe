@@ -9,43 +9,45 @@ using static Extensions;
 
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
-var sql = SELECT(
-            "C.ID as CustomerId",
-            "L.ID as LoanId",
-            "L.AMOUNT as LoanAmount",
-            "L.PMT as LoanPmt")
-          .FROM("dbo.CLIENTS as C")
-          .INNER_JOIN("dbo.LOANS as L")
-          .ON("C.ID = L.CLIENT_ID")
-          .WHERE("C.ID = @id")
-          .ToSql()
-          .Tap();
+var age = 18;
+var amount = 200;
 
-var clients = executor.QuerySingle(
-    sql,
-    new SqlParameter[] { new SqlParameter("@id", 2) },
-    r => new Client(
-        r.GetValueAs<int>("CustomerId"),
-        r.GetValueAs<int>("LoanId"),
-        r.GetValueAs<decimal>("LoanAmount"),
-        r.GetValueAsNullable<decimal>("LoanPmt")));
+var customers = executor.Query(
+    SELECT(
+        "C.ID as CustomerId",
+        "C.FIRST_NAME as CustomerName",
+        "L.ID as LoanId",
+        "L.AMOUNT as LoanAmount",
+        "L.PMT as LoanPmt")
+      .FROM("dbo.CLIENTS as C")
+      .INNER_JOIN("dbo.LOANS as L")
+      .ON("C.ID = L.CLIENT_ID")
+      .WHERE("C.AGE > @age AND L.AMOUNT > @amount")
+      .ToSql(),
+    CreateParams(
+        CreateParam("@age", age),
+        CreateParam("@amount", amount)),
+    r => new
+    {
+        CustomerId = r.GetValueAs<int>("CustomerId"),
+        CustomerName = r.GetValueAs<string>("CustomerName"),
+        LoanId = r.GetValueAs<int>("LoanId"),
+        LoanAmount = r.GetValueAs<decimal>("LoanAmount"),
+        LoanPmt = r.GetValueAsNullable<decimal>("LoanPmt")
+    });
 
-Console.WriteLine(string.Join('\n', clients));
 
-record Client(
-    int Id,
-    int LoanId,
-    decimal LoanAmount,
-    decimal? Pmt);
+Console.WriteLine(string.Join('\n', customers));
+
 
 //executor.INSERT_INTO(
 //    "dbo.LOANS",
 //    new SqlParameter[]
 //    {
-//        new("CLIENT_ID", 2),
-//        new("AMOUNT", 5000m),
-//        new("TERM_BEGIN", new DateTime(2022, 6, 1)),
-//        new("TERM_END", new DateTime(2022, 10, 1))
+//        new("CLIENT_ID", 4),
+//        new("AMOUNT", 130m),
+//        new("TERM_BEGIN", new DateTime(2022, 5, 1)),
+//        new("TERM_END", new DateTime(2022, 7, 1))
 //    });
 
 //var clients = executor.Query(
@@ -243,7 +245,7 @@ public static class LessUsableExtensions
             (acc, item) => acc.Contains(item) ? acc.Replace(item, $"\n{item}") : acc);
     }
 
-    public static string Tap(this string self)
+    public static T Tap<T>(this T self)
     {
         Console.WriteLine(self);
         return self;
@@ -253,6 +255,18 @@ public static class LessUsableExtensions
 public static class Extensions
 {
     #region Executor
+
+    public static TResult? QuerySingle<TResult>(
+        this Executor self,
+        string sql,
+        Func<IDataRecord, TResult> map) =>
+        self.QuerySingle(sql, Array.Empty<SqlParameter>(), map);
+
+    public static IList<TResult>? Query<TResult>(
+        this Executor self,
+        string sql,
+        Func<IDataRecord, TResult> map) =>
+        self.Query(sql, Array.Empty<SqlParameter>(), map);
 
     public static bool INSERT_INTO(
         this Executor self,
@@ -361,6 +375,21 @@ public static class Extensions
         self.IsDBNull(self.GetOrdinal(columnName))
             ? default
             : (T?)self.GetValue(self.GetOrdinal(columnName));
+
+    #endregion
+
+    #region SqlParameter
+
+    public static SqlParameter[] CreateParams(params SqlParameter[] sqlParameters) => sqlParameters;
+    private static SqlParameter CreateParam(string parameterName, object value, DbType dbType) => new(parameterName, value) { DbType = dbType };
+    public static SqlParameter CreateParam(string parameterName, byte value) => CreateParam(parameterName, value, DbType.Byte);
+    public static SqlParameter CreateParam(string parameterName, short value) => CreateParam(parameterName, value, DbType.Int16);
+    public static SqlParameter CreateParam(string parameterName, int value) => CreateParam(parameterName, value, DbType.Int32);
+    public static SqlParameter CreateParam(string parameterName, long value) => CreateParam(parameterName, value, DbType.Int64);
+    public static SqlParameter CreateParam(string parameterName, float value) => CreateParam(parameterName, value, DbType.Double);
+    public static SqlParameter CreateParam(string parameterName, double value) => CreateParam(parameterName, value, DbType.Double);
+    public static SqlParameter CreateParam(string parameterName, decimal value) => CreateParam(parameterName, value, DbType.Decimal);
+    public static SqlParameter CreateParam(string parameterName, string value) => CreateParam(parameterName, value, DbType.String);
 
     #endregion
 }
