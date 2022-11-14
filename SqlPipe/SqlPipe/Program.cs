@@ -9,6 +9,60 @@ using static Extensions;
 
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
+var x = SELECT(
+            "C.ID as CustomerId",
+            "L.ID as LoanId",
+            "L.AMOUNT as LoanAmount",
+            "L.PMT as LoanPmt")
+          .FROM("dbo.CLIENTS as C")
+          .INNER_JOIN("dbo.LOANS as L")
+          .ON("C.ID = L.CLIENT_ID")
+          .WHERE("C.ID = 4")
+          .ToSql()
+          .Tap();
+
+var clients = executor.QuerySingle(
+    x,
+    r => new
+    {
+        Id = r.GetValueAs<int>("CustomerId"),
+        LoanId = r.GetValueAs<int>("LoanId"),
+        LoanAmount = r.GetValueAs<decimal>("LoanAmount"),
+        Pmt = r.GetValueAsNullable<decimal>("LoanPmt")
+    });
+
+Console.WriteLine(string.Join('\n', clients));
+
+//executor.INSERT_INTO(
+//    "dbo.LOANS",
+//    new SqlParameter[]
+//    {
+//        new("CLIENT_ID", 4),
+//        new("AMOUNT", 300m),
+//        new("TERM_BEGIN", new DateTime(2022, 1, 1)),
+//        new("TERM_END", new DateTime(2022, 6, 1))
+//    });
+
+//var clients = executor.Query(
+//    SELECT().FROM("dbo.CLIENTS")
+//            .ToSql(),
+//    r => new
+//    {
+//        Id = r.GetValueAs<int>("ID"),
+//        Name = r.GetValueAs<string>("FIRST_NAME"),
+//        Age = r.GetValueAs<byte>("AGE")
+//    });
+
+//Console.WriteLine(string.Join('\n', clients));
+
+//executor.UPDATE(
+//    "dbo.CLIENTS",
+//    new SqlParameter[]
+//    {
+//        new("FIRST_NAME", "B")
+//    },
+//    "ID = 6");
+
 
 Console.WriteLine("Hello, World!");
 
@@ -65,10 +119,12 @@ public sealed class Executor
         Disposable.Of(ResolveConnection)
                   .Use(c => Disposable.Of(() => CreateCommand(c, sql))
                                       .Use(c => Disposable.Of(() => c.ExecuteReader(commandBehavior))
-                                                          .Use(r => r.Read() ? map(r) : default)));
+                                                          .Use(map)));
 
     public TResult? QuerySingle<TResult>(string sql, Func<IDataRecord, TResult> map) =>
-        Query(sql, map, CommandBehavior.SingleRow);
+        Query(sql, 
+              r => r.Read() ? map(r) : default, 
+              CommandBehavior.SingleRow);
 
     public IList<TResult>? Query<TResult>(string sql, Func<IDataRecord, TResult> map) =>
         Query(sql,
@@ -84,8 +140,7 @@ public sealed class Executor
                                       {
                                           c.CommandType = CommandType.StoredProcedure;
 
-                                          sqlParameters.ToList()
-                                                       .ForEach(p => c.Parameters.Add(p));
+                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
 
                                           return c.ExecuteNonQuery() > 0;
                                       }));
@@ -95,8 +150,9 @@ public sealed class Executor
                   .Use(c => Disposable.Of(() => CreateCommand(c, sql))
                                       .Use(c =>
                                       {
-                                          sqlParameters.ToList()
-                                                       .ForEach(p => c.Parameters.Add(p));
+                                          c.CommandType = CommandType.Text;
+
+                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
 
                                           return c.ExecuteNonQuery() > 0;
                                       }));
@@ -132,6 +188,36 @@ public abstract record Clause
     public sealed record GroupBy(Clause Predecessor, string Value) : Clause;
     public sealed record Having(Clause Predecessor, string Value) : Clause;
     public sealed record Union(Clause Predecessor) : Clause;
+}
+
+public static class LessUsableExtensions
+{
+    public static string ToPrettySql(this Clause self) => self switch
+    {
+        Select(null, { Length: 0 }) => "SELECT *",
+        Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
+        Select(var p, { Length: 0 }) => p.ToPrettySql() + "\nSELECT *",
+        Select(var p, var xs) => p.ToPrettySql() + $"\nSELECT {string.Join(',', xs)}",
+        Top(var p, var v) => p.ToSql().Replace("SELECT", $"SELECT TOP ({v})"),
+        From(var p, var v) => p.ToPrettySql() + $" FROM {v}",
+        Where(var p, var v) => p.ToPrettySql() + $"\nWHERE {v}",
+        OrderBy(var p, var v) => p.ToPrettySql() + $"\nORDER BY {v}",
+        InnerJoin(var p, var v) => p.ToPrettySql() + $"\nINNER JOIN {v}",
+        LeftJoin(var p, var v) => p.ToPrettySql() + $"\nLEFT JOIN {v}",
+        RightJoin(var p, var v) => p.ToPrettySql() + $"\nRIGHT JOIN {v}",
+        FullOuterJoin(var p, var v) => p.ToPrettySql() + $"\nFULL OUTER JOIN {v}",
+        On(var p, var v) => p.ToPrettySql() + $"\nON {v}",
+        GroupBy(var p, var v) => p.ToPrettySql() + $"\nGROUP BY {v}",
+        Having(var p, var v) => p.ToSql() + $"\nHAVING {v}",
+        Union(var p) => p.ToPrettySql() + $"\nUNION",
+        _ => throw new NotImplementedException(nameof(self))
+    };
+
+    public static string Tap(this string self)
+    {
+        Console.WriteLine(self);
+        return self;
+    }
 }
 
 public static class Extensions
@@ -211,46 +297,22 @@ public static class Extensions
     {
         Select(null, { Length: 0 }) => "SELECT *",
         Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
-        Select(var p, { Length: 0 }) => p.ToSql() + " SELECT *",
-        Select(var p, var xs) => p.ToSql() + $" SELECT {string.Join(',', xs)}",
-        Top(var p, var v) => p.ToSql().AppendAfter("SELECT", $" TOP ({v})"),
-        From(var p, var v) => p.ToSql() + $" FROM {v}",
-        Where(var p, var v) => p.ToSql() + $" WHERE {v}",
-        OrderBy(var p, var v) => p.ToSql() + $" ORDER BY {v}",
-        InnerJoin(var p, var v) => p.ToSql() + $" INNER JOIN {v}",
-        LeftJoin(var p, var v) => p.ToSql() + $" LEFT JOIN {v}",
-        RightJoin(var p, var v) => p.ToSql() + $" RIGHT JOIN {v}",
-        FullOuterJoin(var p, var v) => p.ToSql() + $" FULL OUTER JOIN {v}",
-        On(var p, var v) => p.ToSql() + $" ON {v}",
-        GroupBy(var p, var v) => p.ToSql() + $" GROUP BY {v}",
-        Having(var p, var v) => p.ToSql() + $" HAVING {v}",
-        Union(var p) => p.ToSql() + $" UNION",
+        Select(var p, { Length: 0 }) => $"{p.ToSql()} SELECT *",
+        Select(var p, var xs) => $"{p.ToSql()} SELECT {string.Join(',', xs)}",
+        Top(var p, var v) => p.ToSql().Replace("SELECT", $"SELECT TOP ({v})"),
+        From(var p, var v) => $"{p.ToSql()} FROM {v}",
+        Where(var p, var v) => $"{p.ToSql()} WHERE {v}",
+        OrderBy(var p, var v) => $"{p.ToSql()} ORDER BY {v}",
+        InnerJoin(var p, var v) => $"{p.ToSql()} INNER JOIN {v}",
+        LeftJoin(var p, var v) => $"{p.ToSql()} LEFT JOIN {v}",
+        RightJoin(var p, var v) => $"{p.ToSql()} RIGHT JOIN {v}",
+        FullOuterJoin(var p, var v) => $"{p.ToSql()} FULL OUTER JOIN {v}",
+        On(var p, var v) => $"{p.ToSql()} ON {v}",
+        GroupBy(var p, var v) => $"{p.ToSql()} GROUP BY {v}",
+        Having(var p, var v) => $"{p.ToSql()} HAVING {v}",
+        Union(var p) => $"{p.ToSql()} UNION",
         _ => throw new NotImplementedException(nameof(self))
     };
-
-    public static string ToPrettySql(this Clause self) => self switch
-    {
-        Select(null, { Length: 0 }) => "SELECT *",
-        Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
-        Select(var p, { Length: 0 }) => p.ToPrettySql() + "\nSELECT *",
-        Select(var p, var xs) => p.ToPrettySql() + $"\nSELECT {string.Join(',', xs)}",
-        Top(var p, var v) => p.ToPrettySql().AppendAfter("\nSELECT", $" TOP ({v})"),
-        From(var p, var v) => p.ToPrettySql() + $" FROM {v}",
-        Where(var p, var v) => p.ToPrettySql() + $"\nWHERE {v}",
-        OrderBy(var p, var v) => p.ToPrettySql() + $"\nORDER BY {v}",
-        InnerJoin(var p, var v) => p.ToPrettySql() + $"\nINNER JOIN {v}",
-        LeftJoin(var p, var v) => p.ToPrettySql() + $"\nLEFT JOIN {v}",
-        RightJoin(var p, var v) => p.ToPrettySql() + $"\nRIGHT JOIN {v}",
-        FullOuterJoin(var p, var v) => p.ToPrettySql() + $"\nFULL OUTER JOIN {v}",
-        On(var p, var v) => p.ToPrettySql() + $"\nON {v}",
-        GroupBy(var p, var v) => p.ToPrettySql() + $"\nGROUP BY {v}",
-        Having(var p, var v) => p.ToSql() + $"\nHAVING {v}",
-        Union(var p) => p.ToPrettySql() + $"\nUNION",
-        _ => throw new NotImplementedException(nameof(self))
-    };
-
-    public static string AppendAfter(this string self, string after, string value) =>
-        self.Replace(after, after + value);
 
     #endregion
 
