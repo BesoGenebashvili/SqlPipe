@@ -9,6 +9,31 @@ using static Extensions;
 
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
+executor.Text(
+    @"
+CREATE TABLE dbo.USERS(
+ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
+USERNAME VARCHAR(100) NOT NULL,
+PASSWORD VARCHAR(100) NOT NULL)");
+
+executor.Text(
+    @"
+CREATE TABLE dbo.TODOS(
+ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
+USER_ID INT NOT NULL FOREIGN KEY REFERENCES USERS(ID),
+TITLE VARCHAR(100) NOT NULL,
+DESCRIPTION VARCHAR(MAX) NOT NULL,
+IS_DONE BIT NOT NULL,
+CATEGORY TINYINT NOT NULL,
+NOTE VARCHAR(MAX) NOT NULL)");
+
+executor.Text(
+    @"
+CREATE TABLE dbo.TODO_FILES(
+ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
+TODO_ID INT NOT NULL FOREIGN KEY REFERENCES TODOS(ID),
+PATH VARCHAR(200) NOT NULL)");
+
 var age = 18;
 var amount = 200;
 
@@ -24,9 +49,9 @@ var customers = executor.Query(
       .ON("C.ID = L.CLIENT_ID")
       .WHERE("C.AGE > @age AND L.AMOUNT > @amount")
       .ToSql(),
-    CreateParams(
-        CreateParam("@age", age),
-        CreateParam("@amount", amount)),
+    SqlParams(
+        SqlParam("@age", age),
+        SqlParam("@amount", amount)),
     r => new
     {
         CustomerId = r.GetValueAs<int>("CustomerId"),
@@ -273,13 +298,12 @@ public static class Extensions
         string tableName,
         params SqlParameter[] sqlParameters)
     {
-        var sqlBuilder = new StringBuilder($"INSERT INTO {tableName} ")
-            .Append($"({string.Join(',', sqlParameters.Select(p => p.ParameterName))}) ");
+        var inputParams = sqlParameters.Where(p => p.Direction == ParameterDirection.Input);
 
-        sqlParameters = Array.ConvertAll(sqlParameters, p => { p.ParameterName = '@' + p.ParameterName; return p; });
-
-        var sql = sqlBuilder.Append($"VALUES ({string.Join(',', sqlParameters.Select(p => p.ParameterName))})")
-                            .ToString();
+        var sql = $@"
+INSERT INTO {tableName} ({string.Join(',', inputParams.Select(p => p.SourceColumn))})
+VALUES ({string.Join(',', inputParams.Select(p => p.ParameterName))})
+SET @IDENTITY = SCOPE_IDENTITY();";
 
         return self.Text(sql, sqlParameters);
     }
@@ -290,10 +314,11 @@ public static class Extensions
         SqlParameter[] sqlParameters,
         string where) =>
         self.Text(
-            $"UPDATE {tableName} SET {string.Join(',', sqlParameters.Select(p => $"{p.ParameterName} = @{p.ParameterName}"))} WHERE {where}",
-            Array.ConvertAll(
-                sqlParameters,
-                p => { p.ParameterName = '@' + p.ParameterName; return p; }));
+            $@"
+UPDATE {tableName}
+SET {string.Join(',', sqlParameters.Select(p => $"{p.SourceColumn} = {p.ParameterName}"))}
+WHERE {where}",
+            sqlParameters);
 
     public static bool DELETE_FROM(
         this Executor self,
@@ -380,16 +405,31 @@ public static class Extensions
 
     #region SqlParameter
 
-    public static SqlParameter[] CreateParams(params SqlParameter[] sqlParameters) => sqlParameters;
-    private static SqlParameter CreateParam(string parameterName, object value, DbType dbType) => new(parameterName, value) { DbType = dbType };
-    public static SqlParameter CreateParam(string parameterName, byte value) => CreateParam(parameterName, value, DbType.Byte);
-    public static SqlParameter CreateParam(string parameterName, short value) => CreateParam(parameterName, value, DbType.Int16);
-    public static SqlParameter CreateParam(string parameterName, int value) => CreateParam(parameterName, value, DbType.Int32);
-    public static SqlParameter CreateParam(string parameterName, long value) => CreateParam(parameterName, value, DbType.Int64);
-    public static SqlParameter CreateParam(string parameterName, float value) => CreateParam(parameterName, value, DbType.Double);
-    public static SqlParameter CreateParam(string parameterName, double value) => CreateParam(parameterName, value, DbType.Double);
-    public static SqlParameter CreateParam(string parameterName, decimal value) => CreateParam(parameterName, value, DbType.Decimal);
-    public static SqlParameter CreateParam(string parameterName, string value) => CreateParam(parameterName, value, DbType.String);
+    public static SqlParameter[] SqlParams(params SqlParameter[] sqlParameters) => sqlParameters;
+
+    private static SqlParameter SqlParam(
+        string parameterName,
+        object value,
+        DbType dbType,
+        string? sourceColumn = null) =>
+        new()
+        {
+            ParameterName = parameterName,
+            Value = value,
+            DbType = dbType,
+            SourceColumn = sourceColumn,
+        };
+
+    public static SqlParameter SqlOutParam(string parameterName, SqlDbType dbType) => new(parameterName, dbType) { Direction = ParameterDirection.Output };
+    public static SqlParameter SqlParam(string parameterName, bool value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Boolean, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, byte value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Byte, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, short value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int16, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, int value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int32, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, long value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int64, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, float value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Double, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, double value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Double, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, decimal value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Decimal, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, string value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.String, sourceColumn);
 
     #endregion
 }
