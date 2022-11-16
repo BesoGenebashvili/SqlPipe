@@ -9,14 +9,16 @@ using static Extensions;
 
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
-executor.Text(
+executor.Transaction(async x => await x.TextAsync(""));
+
+await executor.TextAsync(
     @"
 CREATE TABLE dbo.USERS(
 ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
 USERNAME VARCHAR(100) NOT NULL,
 PASSWORD VARCHAR(100) NOT NULL)");
 
-executor.Text(
+await executor.TextAsync(
     @"
 CREATE TABLE dbo.TODOS(
 ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
@@ -27,7 +29,7 @@ IS_DONE BIT NOT NULL,
 CATEGORY TINYINT NOT NULL,
 NOTE VARCHAR(MAX) NOT NULL)");
 
-executor.Text(
+await executor.TextAsync(
     @"
 CREATE TABLE dbo.TODO_FILES(
 ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
@@ -37,7 +39,7 @@ PATH VARCHAR(200) NOT NULL)");
 var age = 18;
 var amount = 200;
 
-var customers = executor.Query(
+var customers = await executor.QueryAsync(
     SELECT(
         "C.ID as CustomerId",
         "C.FIRST_NAME as CustomerName",
@@ -98,6 +100,9 @@ Console.WriteLine(string.Join('\n', customers));
 
 //Console.WriteLine("Hello, World!");
 
+#region less usable region
+
+[Obsolete]
 public sealed class Disposable<T> where T : IDisposable
 {
     private readonly Func<T> _factory;
@@ -118,124 +123,11 @@ public sealed class Disposable<T> where T : IDisposable
     }
 }
 
+[Obsolete]
 public static class Disposable
 {
     public static Disposable<T> Of<T>(Func<T> factory)
         where T : IDisposable => new(factory);
-}
-
-public sealed class Executor
-{
-    private readonly string _connectionString;
-
-    public Executor(string connectionString) =>
-        _connectionString = connectionString;
-
-    private IDbConnection ResolveConnection()
-    {
-        return EnsureOpen(new SqlConnection(_connectionString));
-
-        static IDbConnection EnsureOpen(IDbConnection connection)
-        {
-            if (connection.State is not ConnectionState.Open)
-                connection.Open();
-
-            return connection;
-        }
-    }
-
-    private static IDbCommand CreateCommand(IDbConnection connection, string cmd) =>
-        new SqlCommand(cmd, connection as SqlConnection);
-
-    private bool ExecuteNonQuery(
-        string cmd,
-        CommandType commandType,
-        SqlParameter[] sqlParameters) =>
-        Disposable.Of(ResolveConnection)
-                  .Use(c => Disposable.Of(() => CreateCommand(c, cmd))
-                                      .Use(c =>
-                                      {
-                                          c.CommandType = commandType;
-
-                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
-
-                                          return c.ExecuteNonQuery() > 0;
-                                      }));
-
-    private TResult? ExecuteQuery<TResult>(
-        string cmd,
-        CommandBehavior commandBehavior,
-        SqlParameter[] sqlParameters,
-        Func<IDataReader, TResult?> map) =>
-        Disposable.Of(ResolveConnection)
-                  .Use(c => Disposable.Of(() => CreateCommand(c, cmd))
-                                      .Use(c =>
-                                      {
-                                          Array.ForEach(sqlParameters, p => c.Parameters.Add(p));
-
-                                          return Disposable.Of(() => c.ExecuteReader(commandBehavior))
-                                                           .Use(map);
-                                      }));
-
-    public TResult? QuerySingle<TResult>(
-        string sql,
-        SqlParameter[] sqlParameters,
-        Func<IDataRecord, TResult> map) =>
-        ExecuteQuery(
-            sql,
-            CommandBehavior.SingleRow,
-            sqlParameters,
-            r => r.Read() ? map(r) : default);
-
-    public IList<TResult>? Query<TResult>(
-        string sql,
-        SqlParameter[] sqlParameters,
-        Func<IDataRecord, TResult> map) =>
-        ExecuteQuery(
-            sql,
-            CommandBehavior.Default,
-            sqlParameters,
-            r => r.AsEnumerable()
-                  .Select(map)
-                  .ToList());
-
-    public bool Procedure(string name, params SqlParameter[] sqlParameters) =>
-        ExecuteNonQuery(name, CommandType.StoredProcedure, sqlParameters);
-
-    public bool Text(string sql, params SqlParameter[] sqlParameters) =>
-        ExecuteNonQuery(sql, CommandType.Text, sqlParameters);
-
-    public bool Transaction(Action<Executor> action) =>
-        Disposable.Of(() => new TransactionScope())
-                  .Use(t =>
-                  {
-                      try
-                      {
-                          action(this);
-
-                          t.Complete();
-
-                          return true;
-                      }
-                      catch { return false; }
-                  });
-}
-
-public abstract record Clause
-{
-    public sealed record Select(Clause? Predecessor, params string[] Values) : Clause;
-    public sealed record Top(Clause Predecessor, int Value) : Clause;
-    public sealed record From(Clause Predecessor, string Value) : Clause;
-    public sealed record Where(Clause Predecessor, string Value) : Clause;
-    public sealed record OrderBy(Clause Predecessor, string Value) : Clause;
-    public sealed record InnerJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record LeftJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record RightJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record FullOuterJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record On(Clause Predecessor, string Value) : Clause;
-    public sealed record GroupBy(Clause Predecessor, string Value) : Clause;
-    public sealed record Having(Clause Predecessor, string Value) : Clause;
-    public sealed record Union(Clause Predecessor) : Clause;
 }
 
 public static class LessUsableExtensions
@@ -277,23 +169,123 @@ public static class LessUsableExtensions
     }
 }
 
+#endregion
+
+public sealed class Executor
+{
+    private readonly string _connectionString;
+
+    public Executor(string connectionString) =>
+        _connectionString = connectionString;
+
+    private async Task<bool> ExecuteNonQueryAsync(
+        string command,
+        CommandType commandType,
+        SqlParameter[] sqlParameters)
+    {
+        using var sqlConnection = new SqlConnection(_connectionString);
+        using var sqlCommand = new SqlCommand(command);
+
+        sqlCommand.CommandType = commandType;
+        sqlCommand.Parameters.AddRange(sqlParameters);
+
+        await sqlConnection.OpenAsync();
+        return await sqlCommand.ExecuteNonQueryAsync() > 0;
+    }
+
+    private async Task<TResult> ExecuteQueryAsync<TResult>(
+        string command,
+        CommandBehavior commandBehavior,
+        SqlParameter[] sqlParameters,
+        Func<IDataReader, TResult> map)
+    {
+        using var sqlConnection = new SqlConnection(_connectionString);
+        using var sqlCommand = new SqlCommand(command);
+
+        sqlCommand.Parameters.AddRange(sqlParameters);
+
+        await sqlConnection.OpenAsync();
+        return map(await sqlCommand.ExecuteReaderAsync(commandBehavior));
+    }
+
+    public Task<TResult> QuerySingleAsync<TResult>(
+        string sql,
+        SqlParameter[] sqlParameters,
+        Func<IDataRecord, TResult> map) =>
+        ExecuteQueryAsync(
+            sql,
+            CommandBehavior.SingleRow,
+            sqlParameters,
+            r => r.Read() ? map(r) : default)!;
+
+    public Task<List<TResult>> QueryAsync<TResult>(
+        string sql,
+        SqlParameter[] sqlParameters,
+        Func<IDataRecord, TResult> map) =>
+        ExecuteQueryAsync(
+            sql,
+            CommandBehavior.Default,
+            sqlParameters,
+            r => r.AsEnumerable()
+                  .Select(map)
+                  .ToList());
+
+    public Task<bool> ProcedureAsync(string name, params SqlParameter[] sqlParameters) =>
+        ExecuteNonQueryAsync(name, CommandType.StoredProcedure, sqlParameters);
+
+    public Task<bool> TextAsync(string sql, params SqlParameter[] sqlParameters) =>
+        ExecuteNonQueryAsync(sql, CommandType.Text, sqlParameters);
+}
+
+public abstract record Clause
+{
+    public sealed record Select(Clause? Predecessor, params string[] Values) : Clause;
+    public sealed record Top(Clause Predecessor, int Value) : Clause;
+    public sealed record From(Clause Predecessor, string Value) : Clause;
+    public sealed record Where(Clause Predecessor, string Value) : Clause;
+    public sealed record OrderBy(Clause Predecessor, string Value) : Clause;
+    public sealed record InnerJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record LeftJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record RightJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record FullOuterJoin(Clause Predecessor, string Value) : Clause;
+    public sealed record On(Clause Predecessor, string Value) : Clause;
+    public sealed record GroupBy(Clause Predecessor, string Value) : Clause;
+    public sealed record Having(Clause Predecessor, string Value) : Clause;
+    public sealed record Union(Clause Predecessor) : Clause;
+}
+
 public static class Extensions
 {
     #region Executor
 
-    public static TResult? QuerySingle<TResult>(
+    public static bool Transaction(this Executor self, Action<Executor> action)
+    {
+        using var transactionScope = new TransactionScope();
+
+        try
+        {
+            action(self);
+
+            transactionScope.Complete();
+
+            return true;
+        }
+        catch { return false; }
+    }
+
+    public static Task<TResult> QuerySingleAsync<TResult>(
         this Executor self,
         string sql,
         Func<IDataRecord, TResult> map) =>
-        self.QuerySingle(sql, Array.Empty<SqlParameter>(), map);
+        self.QuerySingleAsync(sql, Array.Empty<SqlParameter>(), map);
 
-    public static IList<TResult>? Query<TResult>(
+    public static Task<List<TResult>> Query<TResult>(
         this Executor self,
         string sql,
         Func<IDataRecord, TResult> map) =>
-        self.Query(sql, Array.Empty<SqlParameter>(), map);
+        self.QueryAsync(sql, Array.Empty<SqlParameter>(), map);
 
-    public static bool INSERT_INTO(
+    public static Task<bool> INSERT_INTO(
         this Executor self,
         string tableName,
         params SqlParameter[] sqlParameters)
@@ -305,26 +297,26 @@ INSERT INTO {tableName} ({string.Join(',', inputParams.Select(p => p.SourceColum
 VALUES ({string.Join(',', inputParams.Select(p => p.ParameterName))})
 SET @IDENTITY = SCOPE_IDENTITY();";
 
-        return self.Text(sql, sqlParameters);
+        return self.TextAsync(sql, sqlParameters);
     }
 
-    public static bool UPDATE(
+    public static Task<bool> UPDATE(
         this Executor self,
         string tableName,
         SqlParameter[] sqlParameters,
         string where) =>
-        self.Text(
+        self.TextAsync(
             $@"
 UPDATE {tableName}
 SET {string.Join(',', sqlParameters.Select(p => $"{p.SourceColumn} = {p.ParameterName}"))}
 WHERE {where}",
             sqlParameters);
 
-    public static bool DELETE_FROM(
+    public static Task<bool> DELETE_FROM(
         this Executor self,
         string tableName,
         string where) =>
-        self.Text($"DELETE FROM {tableName} WHERE {where}");
+        self.TextAsync($"DELETE FROM {tableName} WHERE {where}");
 
     #endregion
 
