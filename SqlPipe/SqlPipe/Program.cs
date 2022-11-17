@@ -1,4 +1,5 @@
 ﻿using System.Data;
+using System.Data.Common;
 using System.Data.SqlClient;
 using System.Text;
 using System.Transactions;
@@ -66,7 +67,6 @@ var customers = await executor.QueryAsync(
 
 Console.WriteLine(string.Join('\n', customers));
 
-
 //executor.INSERT_INTO(
 //    "dbo.LOANS",
 //    new SqlParameter[]
@@ -99,77 +99,6 @@ Console.WriteLine(string.Join('\n', customers));
 
 
 //Console.WriteLine("Hello, World!");
-
-#region less usable region
-
-[Obsolete]
-public sealed class Disposable<T> where T : IDisposable
-{
-    private readonly Func<T> _factory;
-
-    internal Disposable(Func<T> factory) =>
-        _factory = factory;
-
-    public void Use(Action<T> action)
-    {
-        using T x = _factory();
-        action(x);
-    }
-
-    public TResult Use<TResult>(Func<T, TResult> map)
-    {
-        using var x = _factory();
-        return map(x);
-    }
-}
-
-[Obsolete]
-public static class Disposable
-{
-    public static Disposable<T> Of<T>(Func<T> factory)
-        where T : IDisposable => new(factory);
-}
-
-public static class LessUsableExtensions
-{
-    public static string ToPrettySql(this Clause self) => self switch
-    {
-        Select(null, { Length: 0 }) => "SELECT *",
-        Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
-        Select(var p, { Length: 0 }) => p.ToPrettySql() + "\nSELECT *",
-        Select(var p, var xs) => p.ToPrettySql() + $"\nSELECT {string.Join(',', xs)}",
-        Top(var p, var v) => p.ToSql().Replace("SELECT", $"SELECT TOP ({v})"),
-        From(var p, var v) => p.ToPrettySql() + $" FROM {v}",
-        Where(var p, var v) => p.ToPrettySql() + $"\nWHERE {v}",
-        OrderBy(var p, var v) => p.ToPrettySql() + $"\nORDER BY {v}",
-        InnerJoin(var p, var v) => p.ToPrettySql() + $"\nINNER JOIN {v}",
-        LeftJoin(var p, var v) => p.ToPrettySql() + $"\nLEFT JOIN {v}",
-        RightJoin(var p, var v) => p.ToPrettySql() + $"\nRIGHT JOIN {v}",
-        FullOuterJoin(var p, var v) => p.ToPrettySql() + $"\nFULL OUTER JOIN {v}",
-        On(var p, var v) => p.ToPrettySql() + $"\nON {v}",
-        GroupBy(var p, var v) => p.ToPrettySql() + $"\nGROUP BY {v}",
-        Having(var p, var v) => p.ToSql() + $"\nHAVING {v}",
-        Union(var p) => p.ToPrettySql() + $"\nUNION",
-        _ => throw new NotImplementedException(nameof(self))
-    };
-
-    public static string ToPrettySql2(this Clause self)
-    {
-        var keywords = new[] { "FROM", "WHERE", "ORDER BY", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL OUTER JOIN", "ON", "GROUP BY", "UNION" };
-
-        return keywords.Aggregate(
-            self.ToSql(),
-            (acc, item) => acc.Contains(item) ? acc.Replace(item, $"\n{item}") : acc);
-    }
-
-    public static T Tap<T>(this T self)
-    {
-        Console.WriteLine(self);
-        return self;
-    }
-}
-
-#endregion
 
 public sealed class Executor
 {
@@ -315,8 +244,11 @@ WHERE {where}",
     public static Task<bool> DELETE_FROM(
         this Executor self,
         string tableName,
+        SqlParameter[] sqlParameters,
         string where) =>
-        self.TextAsync($"DELETE FROM {tableName} WHERE {where}");
+        self.TextAsync(
+            $"DELETE FROM {tableName} WHERE {where}", 
+            sqlParameters);
 
     #endregion
 
@@ -374,6 +306,21 @@ WHERE {where}",
         Union(var p) => $"{p.ToSql()} UNION",
         _ => throw new NotImplementedException(nameof(self))
     };
+
+    public static string ToPrettySql(this Clause self) =>
+        new[] { "FROM",
+                "WHERE",
+                "ORDER BY",
+                "INNER JOIN",
+                "LEFT JOIN",
+                "RIGHT JOIN",
+                "FULL OUTER JOIN",
+                "ON",
+                "GROUP BY",
+                "UNION" }
+            .Aggregate(
+                self.ToSql(),
+                (acc, item) => acc.Contains(item) ? acc.Replace(item, $"\n{item}") : acc);
 
     #endregion
 
