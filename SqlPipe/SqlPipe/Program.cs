@@ -1,7 +1,5 @@
 ﻿using System.Data;
-using System.Data.Common;
 using System.Data.SqlClient;
-using System.Text;
 using System.Transactions;
 using static Clause;
 using static Extensions;
@@ -10,62 +8,88 @@ using static Extensions;
 
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
-executor.Transaction(async x => await x.TextAsync(""));
+var sql = SELECT().FROM("dbo.USERS")
+                  .WHERE("USERNAME = @username")
+                  .GROUP_BY("USERNAME")
+                  .HAVING("ID = @id")
+                  .ORDER_BY("ID")
+                  .ToPrettySql();
 
-await executor.TextAsync(
-    @"
-CREATE TABLE dbo.USERS(
-ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
-USERNAME VARCHAR(100) NOT NULL,
-PASSWORD VARCHAR(100) NOT NULL)");
-
-await executor.TextAsync(
-    @"
-CREATE TABLE dbo.TODOS(
-ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
-USER_ID INT NOT NULL FOREIGN KEY REFERENCES USERS(ID),
-TITLE VARCHAR(100) NOT NULL,
-DESCRIPTION VARCHAR(MAX) NOT NULL,
-IS_DONE BIT NOT NULL,
-CATEGORY TINYINT NOT NULL,
-NOTE VARCHAR(MAX) NOT NULL)");
-
-await executor.TextAsync(
-    @"
-CREATE TABLE dbo.TODO_FILES(
-ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
-TODO_ID INT NOT NULL FOREIGN KEY REFERENCES TODOS(ID),
-PATH VARCHAR(200) NOT NULL)");
-
-var age = 18;
-var amount = 200;
-
-var customers = await executor.QueryAsync(
-    SELECT(
-        "C.ID as CustomerId",
-        "C.FIRST_NAME as CustomerName",
-        "L.ID as LoanId",
-        "L.AMOUNT as LoanAmount",
-        "L.PMT as LoanPmt")
-      .FROM("dbo.CLIENTS as C")
-      .INNER_JOIN("dbo.LOANS as L")
-      .ON("C.ID = L.CLIENT_ID")
-      .WHERE("C.AGE > @age AND L.AMOUNT > @amount")
-      .ToSql(),
+var results = await executor.QueryAsync(
+    sql,
     SqlParams(
-        SqlParam("@age", age),
-        SqlParam("@amount", amount)),
-    r => new
+        SqlParam("@username", "saba"),
+        SqlParam("@id", 1)),
+    x => new
     {
-        CustomerId = r.GetValueAs<int>("CustomerId"),
-        CustomerName = r.GetValueAs<string>("CustomerName"),
-        LoanId = r.GetValueAs<int>("LoanId"),
-        LoanAmount = r.GetValueAs<decimal>("LoanAmount"),
-        LoanPmt = r.GetValueAsNullable<decimal>("LoanPmt")
+        Id = x.GetValueAs<int>("ID"),
+        Username = x.GetValueAs<string>("USERNAME"),
+        Password = x.GetValueAs<string>("PASSWORD")
     });
 
+Console.WriteLine(
+    string.Join('\n', results));
 
-Console.WriteLine(string.Join('\n', customers));
+//await executor.INSERT_INTO(
+//    "dbo.USERS",
+//    SqlParams(
+//        SqlParam("@username", "saba", "USERNAME"),
+//        SqlParam("@pass", "saba123", "PASSWORD")));
+
+//await executor.TextAsync(
+//    @"
+//CREATE TABLE dbo.USERS(
+//ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
+//USERNAME VARCHAR(100) NOT NULL,
+//PASSWORD VARCHAR(100) NOT NULL)");
+
+//await executor.TextAsync(
+//    @"
+//CREATE TABLE dbo.TODOS(
+//ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
+//USER_ID INT NOT NULL FOREIGN KEY REFERENCES USERS(ID),
+//TITLE VARCHAR(100) NOT NULL,
+//DESCRIPTION VARCHAR(MAX) NOT NULL,
+//IS_DONE BIT NOT NULL,
+//CATEGORY TINYINT NOT NULL,
+//NOTE VARCHAR(MAX) NOT NULL)");
+
+//await executor.TextAsync(
+//    @"
+//CREATE TABLE dbo.TODO_FILES(
+//ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
+//TODO_ID INT NOT NULL FOREIGN KEY REFERENCES TODOS(ID),
+//PATH VARCHAR(200) NOT NULL)");
+
+//var age = 18;
+//var amount = 200;
+
+//var customers = await executor.QueryAsync(
+//    SELECT(
+//        "C.ID as CustomerId",
+//        "C.FIRST_NAME as CustomerName",
+//        "L.ID as LoanId",
+//        "L.AMOUNT as LoanAmount",
+//        "L.PMT as LoanPmt")
+//      .FROM("dbo.CLIENTS as C")
+//      .INNER_JOIN("dbo.LOANS as L")
+//      .ON("C.ID = L.CLIENT_ID")
+//      .WHERE("C.AGE > @age AND L.AMOUNT > @amount")
+//      .ToSql(),
+//    SqlParams(
+//        SqlParam("@age", age),
+//        SqlParam("@amount", amount)),
+//    r => new
+//    {
+//        CustomerId = r.GetValueAs<int>("CustomerId"),
+//        CustomerName = r.GetValueAs<string>("CustomerName"),
+//        LoanId = r.GetValueAs<int>("LoanId"),
+//        LoanAmount = r.GetValueAs<decimal>("LoanAmount"),
+//        LoanPmt = r.GetValueAsNullable<decimal>("LoanPmt")
+//    });
+
+
+//Console.WriteLine(string.Join('\n', customers));
 
 //executor.INSERT_INTO(
 //    "dbo.LOANS",
@@ -113,7 +137,7 @@ public sealed class Executor
         SqlParameter[] sqlParameters)
     {
         using var sqlConnection = new SqlConnection(_connectionString);
-        using var sqlCommand = new SqlCommand(command);
+        using var sqlCommand = new SqlCommand(command, sqlConnection);
 
         sqlCommand.CommandType = commandType;
         sqlCommand.Parameters.AddRange(sqlParameters);
@@ -126,10 +150,11 @@ public sealed class Executor
         string command,
         CommandBehavior commandBehavior,
         SqlParameter[] sqlParameters,
+
         Func<IDataReader, TResult> map)
     {
         using var sqlConnection = new SqlConnection(_connectionString);
-        using var sqlCommand = new SqlCommand(command);
+        using var sqlCommand = new SqlCommand(command, sqlConnection);
 
         sqlCommand.Parameters.AddRange(sqlParameters);
 
@@ -168,18 +193,20 @@ public sealed class Executor
 
 public abstract record Clause
 {
-    public sealed record Select(Clause? Predecessor, params string[] Values) : Clause;
+    public sealed record Select(Clause? Predecessor, params string[] Columns) : Clause;
     public sealed record Top(Clause Predecessor, int Value) : Clause;
-    public sealed record From(Clause Predecessor, string Value) : Clause;
-    public sealed record Where(Clause Predecessor, string Value) : Clause;
-    public sealed record OrderBy(Clause Predecessor, string Value) : Clause;
-    public sealed record InnerJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record LeftJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record RightJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record FullOuterJoin(Clause Predecessor, string Value) : Clause;
-    public sealed record On(Clause Predecessor, string Value) : Clause;
-    public sealed record GroupBy(Clause Predecessor, string Value) : Clause;
-    public sealed record Having(Clause Predecessor, string Value) : Clause;
+    public sealed record From(Clause Predecessor, string Table) : Clause;
+    public sealed record Where(Clause Predecessor, string Condition) : Clause;
+    public sealed record OrderBy(Clause Predecessor, string Column) : Clause;
+    public sealed record OrderByAsc(Clause Predecessor, string Column) : Clause;
+    public sealed record OrderByDesc(Clause Predecessor, string Column) : Clause;
+    public sealed record InnerJoin(Clause Predecessor, string Table) : Clause;
+    public sealed record LeftJoin(Clause Predecessor, string Table) : Clause;
+    public sealed record RightJoin(Clause Predecessor, string Table) : Clause;
+    public sealed record FullOuterJoin(Clause Predecessor, string Table) : Clause;
+    public sealed record On(Clause Predecessor, string Condition) : Clause;
+    public sealed record GroupBy(Clause Predecessor, string Column) : Clause;
+    public sealed record Having(Clause Predecessor, string Condition) : Clause;
     public sealed record Union(Clause Predecessor) : Clause;
 }
 
@@ -208,23 +235,29 @@ public static class Extensions
         Func<IDataRecord, TResult> map) =>
         self.QuerySingleAsync(sql, Array.Empty<SqlParameter>(), map);
 
-    public static Task<List<TResult>> Query<TResult>(
+    public static Task<List<TResult>> QueryAsync<TResult>(
         this Executor self,
         string sql,
         Func<IDataRecord, TResult> map) =>
         self.QueryAsync(sql, Array.Empty<SqlParameter>(), map);
 
+    /// <summary>
+    /// executes 'INSERT INTO' command
+    /// </summary>
+    /// <param name="tableName">Table name</param>
+    /// <param name="sqlParameters">Provide '@IDENTITY' output parameter for last identity</param>
+    /// <returns>'@@ROWCOUNT' > 0</returns>
     public static Task<bool> INSERT_INTO(
         this Executor self,
         string tableName,
-        params SqlParameter[] sqlParameters)
+        SqlParameter[] sqlParameters)
     {
         var inputParams = sqlParameters.Where(p => p.Direction == ParameterDirection.Input);
 
         var sql = $@"
 INSERT INTO {tableName} ({string.Join(',', inputParams.Select(p => p.SourceColumn))})
 VALUES ({string.Join(',', inputParams.Select(p => p.ParameterName))})
-SET @IDENTITY = SCOPE_IDENTITY();";
+{(sqlParameters.Any(p => p.ParameterName == "@IDENTITY") ? "SET @IDENTITY = SCOPE_IDENTITY()" : string.Empty)};";
 
         return self.TextAsync(sql, sqlParameters);
     }
@@ -247,65 +280,117 @@ WHERE {where}",
         SqlParameter[] sqlParameters,
         string where) =>
         self.TextAsync(
-            $"DELETE FROM {tableName} WHERE {where}", 
+            $"DELETE FROM {tableName} WHERE {where}",
             sqlParameters);
 
     #endregion
 
     #region Clause
 
-    public static Select SELECT(params string[] values) => new(null, values);
-    public static Select SELECT(this Union self, params string[] values) => new(self, values);
-    public static From FROM(this Select self, string value) => new(self, value);
-    public static From FROM(this Top self, string value) => new(self, value);
+    public static Select SELECT(params string[] columns) => new(null, columns);
+    public static Select SELECT(this Union self, params string[] columns) => new(self, columns);
+
+    public static From FROM(this Select self, string table) => new(self, table);
+    public static From FROM(this Top self, string table) => new(self, table);
+
     public static Top TOP(this Select self, int value) => new(self, value);
-    public static Where WHERE(this From self, string value) => new(self, value);
-    public static Where WHERE(this On self, string value) => new(self, value);
-    public static OrderBy ORDER_BY(this From self, string value) => new(self, value);
-    public static OrderBy ORDER_BY(this Where self, string value) => new(self, value);
-    public static OrderBy ORDER_BY(this On self, string value) => new(self, value);
-    public static OrderBy ORDER_BY(this GroupBy self, string value) => new(self, value);
-    public static OrderBy ORDER_BY(this Having self, string value) => new(self, value);
-    public static InnerJoin INNER_JOIN(this From self, string value) => new(self, value);
-    public static LeftJoin LEFT_JOIN(this From self, string value) => new(self, value);
-    public static RightJoin RIGHT_JOIN(this From self, string value) => new(self, value);
-    public static FullOuterJoin FULL_OUTER_JOIN(this From self, string value) => new(self, value);
-    public static InnerJoin INNER_JOIN(this On self, string value) => new(self, value);
-    public static LeftJoin LEFT_JOIN(this On self, string value) => new(self, value);
-    public static RightJoin RIGHT_JOIN(this On self, string value) => new(self, value);
-    public static FullOuterJoin FULL_OUTER_JOIN(this On self, string value) => new(self, value);
-    public static On ON(this InnerJoin self, string value) => new(self, value);
-    public static On ON(this LeftJoin self, string value) => new(self, value);
-    public static On ON(this RightJoin self, string value) => new(self, value);
-    public static On ON(this FullOuterJoin self, string value) => new(self, value);
-    public static GroupBy GROUP_BY(this From self, string value) => new(self, value);
-    public static GroupBy GROUP_BY(this Where self, string value) => new(self, value);
-    public static GroupBy GROUP_BY(this On self, string value) => new(self, value);
-    public static Having HAVING(this GroupBy self, string value) => new(self, value);
+
+    public static Where WHERE(this From self, string condition) => new(self, condition);
+    public static Where WHERE(this On self, string condition) => new(self, condition);
+
+    public static OrderBy ORDER_BY(this From self, string column) => new(self, column);
+    public static OrderBy ORDER_BY(this Where self, string column) => new(self, column);
+    public static OrderBy ORDER_BY(this On self, string column) => new(self, column);
+    public static OrderBy ORDER_BY(this GroupBy self, string column) => new(self, column);
+    public static OrderBy ORDER_BY(this Having self, string column) => new(self, column);
+    public static OrderBy ORDER_BY(this OrderBy self, string column) => new(self, column);
+    public static OrderBy ORDER_BY(this OrderByAsc self, string column) => new(self, column);
+    public static OrderBy ORDER_BY(this OrderByDesc self, string column) => new(self, column);
+
+    public static OrderByAsc ORDER_BY_ASC(this From self, string column) => new(self, column);
+    public static OrderByAsc ORDER_BY_ASC(this Where self, string column) => new(self, column);
+    public static OrderByAsc ORDER_BY_ASC(this On self, string column) => new(self, column);
+    public static OrderByAsc ORDER_BY_ASC(this GroupBy self, string column) => new(self, column);
+    public static OrderByAsc ORDER_BY_ASC(this Having self, string column) => new(self, column);
+    public static OrderByAsc ORDER_BY_ASC(this OrderBy self, string column) => new(self, column);
+    public static OrderByAsc ORDER_BY_ASC(this OrderByAsc self, string column) => new(self, column);
+    public static OrderByAsc ORDER_BY_ASC(this OrderByDesc self, string column) => new(self, column);
+
+    public static OrderByDesc ORDER_BY_DESC(this From self, string column) => new(self, column);
+    public static OrderByDesc ORDER_BY_DESC(this Where self, string column) => new(self, column);
+    public static OrderByDesc ORDER_BY_DESC(this On self, string column) => new(self, column);
+    public static OrderByDesc ORDER_BY_DESC(this GroupBy self, string column) => new(self, column);
+    public static OrderByDesc ORDER_BY_DESC(this Having self, string column) => new(self, column);
+    public static OrderByDesc ORDER_BY_DESC(this OrderBy self, string column) => new(self, column);
+    public static OrderByDesc ORDER_BY_DESC(this OrderByAsc self, string column) => new(self, column);
+    public static OrderByDesc ORDER_BY_DESC(this OrderByDesc self, string column) => new(self, column);
+
+    public static InnerJoin INNER_JOIN(this From self, string table) => new(self, table);
+    public static InnerJoin INNER_JOIN(this On self, string table) => new(self, table);
+    public static LeftJoin LEFT_JOIN(this From self, string table) => new(self, table);
+    public static LeftJoin LEFT_JOIN(this On self, string table) => new(self, table);
+    public static RightJoin RIGHT_JOIN(this From self, string table) => new(self, table);
+    public static RightJoin RIGHT_JOIN(this On self, string table) => new(self, table);
+    public static FullOuterJoin FULL_OUTER_JOIN(this From self, string table) => new(self, table);
+    public static FullOuterJoin FULL_OUTER_JOIN(this On self, string table) => new(self, table);
+
+    public static On ON(this InnerJoin self, string condition) => new(self, condition);
+    public static On ON(this LeftJoin self, string condition) => new(self, condition);
+    public static On ON(this RightJoin self, string condition) => new(self, condition);
+    public static On ON(this FullOuterJoin self, string condition) => new(self, condition);
+
+    public static GroupBy GROUP_BY(this From self, string column) => new(self, column);
+    public static GroupBy GROUP_BY(this Where self, string column) => new(self, column);
+    public static GroupBy GROUP_BY(this On self, string column) => new(self, column);
+
+    public static Having HAVING(this GroupBy self, string condition) => new(self, condition);
+
     public static Union UNION(this Where self) => new(self);
     public static Union UNION(this From self) => new(self);
     public static Union UNION(this On self) => new(self);
 
-    public static string ToSql(this Clause self) => self switch
+    public static string ToSql(this Clause self)
     {
-        Select(null, { Length: 0 }) => "SELECT *",
-        Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
-        Select(var p, { Length: 0 }) => $"{p.ToSql()} SELECT *",
-        Select(var p, var xs) => $"{p.ToSql()} SELECT {string.Join(',', xs)}",
-        Top(var p, var v) => p.ToSql().Replace("SELECT", $"SELECT TOP ({v})"),
-        From(var p, var v) => $"{p.ToSql()} FROM {v}",
-        Where(var p, var v) => $"{p.ToSql()} WHERE {v}",
-        OrderBy(var p, var v) => $"{p.ToSql()} ORDER BY {v}",
-        InnerJoin(var p, var v) => $"{p.ToSql()} INNER JOIN {v}",
-        LeftJoin(var p, var v) => $"{p.ToSql()} LEFT JOIN {v}",
-        RightJoin(var p, var v) => $"{p.ToSql()} RIGHT JOIN {v}",
-        FullOuterJoin(var p, var v) => $"{p.ToSql()} FULL OUTER JOIN {v}",
-        On(var p, var v) => $"{p.ToSql()} ON {v}",
-        GroupBy(var p, var v) => $"{p.ToSql()} GROUP BY {v}",
-        Having(var p, var v) => $"{p.ToSql()} HAVING {v}",
-        Union(var p) => $"{p.ToSql()} UNION",
-        _ => throw new NotImplementedException(nameof(self))
-    };
+        return self switch
+        {
+            Select(null, { Length: 0 }) => "SELECT *",
+            Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
+            Select(var p, { Length: 0 }) => $"{p.ToSql()} SELECT *",
+            Select(var p, var xs) => $"{p.ToSql()} SELECT {string.Join(',', xs)}",
+            Top(var p, var v) => p.ToSql().Replace("SELECT", $"SELECT TOP ({v})"),
+            From(var p, var v) => $"{p.ToSql()} FROM {v}",
+            Where(var p, var v) => $"{p.ToSql()} WHERE {v}",
+            OrderBy(var p, var v) => AppendOrderBy(p.ToSql(), v),
+            OrderByAsc(var p, var v) => AppendOrderBy(p.ToSql(), v, true),
+            OrderByDesc(var p, var v) => AppendOrderBy(p.ToSql(), v, false),
+            InnerJoin(var p, var v) => $"{p.ToSql()} INNER JOIN {v}",
+            LeftJoin(var p, var v) => $"{p.ToSql()} LEFT JOIN {v}",
+            RightJoin(var p, var v) => $"{p.ToSql()} RIGHT JOIN {v}",
+            FullOuterJoin(var p, var v) => $"{p.ToSql()} FULL OUTER JOIN {v}",
+            On(var p, var v) => $"{p.ToSql()} ON {v}",
+            GroupBy(var p, var v) => $"{p.ToSql()} GROUP BY {v}",
+            Having(var p, var v) => $"{p.ToSql()} HAVING {v}",
+            Union(var p) => $"{p.ToSql()} UNION",
+            _ => throw new NotImplementedException(nameof(self))
+        };
+
+        static string AppendOrderBy(
+            string sql,
+            string column,
+            bool? isAsc = default)
+        {
+            var columnAndOrder = isAsc switch
+            {
+                true => $"{column} ASC",
+                false => $"{column} DESC",
+                _ => column
+            };
+
+            return sql.Contains("ORDER BY")
+                      ? $"{sql[..^1]}, {columnAndOrder};"
+                      : $"{sql} ORDER BY {columnAndOrder};";
+        }
+    }
 
     public static string ToPrettySql(this Clause self) =>
         new[] { "FROM",
@@ -320,7 +405,7 @@ WHERE {where}",
                 "UNION" }
             .Aggregate(
                 self.ToSql(),
-                (acc, item) => acc.Contains(item) ? acc.Replace(item, $"\n{item}") : acc);
+                (acc, item) => acc.Contains(item) ? acc.Replace(item, '\n' + item) : acc);
 
     #endregion
 
@@ -333,12 +418,12 @@ WHERE {where}",
     }
 
     public static T GetValueAs<T>(this IDataRecord self, string columnName) =>
-        (T)self.GetValue(self.GetOrdinal(columnName));
+        (T)self[columnName];
 
     public static T? GetValueAsNullable<T>(this IDataRecord self, string columnName) where T : struct =>
         self.IsDBNull(self.GetOrdinal(columnName))
             ? default
-            : (T?)self.GetValue(self.GetOrdinal(columnName));
+            : (T?)self[columnName];
 
     #endregion
 
