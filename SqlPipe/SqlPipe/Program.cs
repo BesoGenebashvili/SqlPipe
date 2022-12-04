@@ -194,6 +194,7 @@ public sealed class Executor
 public abstract record Clause
 {
     public sealed record Select(Clause? Predecessor, params string[] Columns) : Clause;
+    public sealed record SelectDistinct(Clause? Predecessor, params string[] Columns) : Clause;
     public sealed record Top(Clause Predecessor, int Value) : Clause;
     public sealed record From(Clause Predecessor, string Table) : Clause;
     public sealed record Where(Clause Predecessor, string Condition) : Clause;
@@ -290,10 +291,15 @@ WHERE {where}",
     public static Select SELECT(params string[] columns) => new(null, columns);
     public static Select SELECT(this Union self, params string[] columns) => new(self, columns);
 
+    public static Select SELECT_DISTINCT(params string[] columns) => new(null, columns);
+    public static Select SELECT_DISTINCT(this Union self, params string[] columns) => new(self, columns);
+
     public static From FROM(this Select self, string table) => new(self, table);
+    public static From FROM(this SelectDistinct self, string table) => new(self, table);
     public static From FROM(this Top self, string table) => new(self, table);
 
     public static Top TOP(this Select self, int value) => new(self, value);
+    public static Top TOP(this SelectDistinct self, int value) => new(self, value);
 
     public static Where WHERE(this From self, string condition) => new(self, condition);
     public static Where WHERE(this On self, string condition) => new(self, condition);
@@ -357,19 +363,23 @@ WHERE {where}",
             Select(null, var xs) => $"SELECT {string.Join(", ", xs)}",
             Select(var p, { Length: 0 }) => $"{p.ToSql()} SELECT *",
             Select(var p, var xs) => $"{p.ToSql()} SELECT {string.Join(',', xs)}",
+            SelectDistinct(null, { Length: 0 }) => "SELECT DISTINCT *",
+            SelectDistinct(null, var xs) => $"SELECT DISTINCT {string.Join(", ", xs)}",
+            SelectDistinct(var p, { Length: 0 }) => $"{p.ToSql()} SELECT DISTINCT *",
+            SelectDistinct(var p, var xs) => $"{p.ToSql()} SELECT DISTINCT {string.Join(',', xs)}",
             Top(var p, var v) => p.ToSql().Replace("SELECT", $"SELECT TOP ({v})"),
-            From(var p, var v) => $"{p.ToSql()} FROM {v}",
-            Where(var p, var v) => $"{p.ToSql()} WHERE {v}",
-            OrderBy(var p, var v) => AppendOrderBy(p.ToSql(), v),
-            OrderByAsc(var p, var v) => AppendOrderBy(p.ToSql(), v, true),
-            OrderByDesc(var p, var v) => AppendOrderBy(p.ToSql(), v, false),
-            InnerJoin(var p, var v) => $"{p.ToSql()} INNER JOIN {v}",
-            LeftJoin(var p, var v) => $"{p.ToSql()} LEFT JOIN {v}",
-            RightJoin(var p, var v) => $"{p.ToSql()} RIGHT JOIN {v}",
-            FullOuterJoin(var p, var v) => $"{p.ToSql()} FULL OUTER JOIN {v}",
-            On(var p, var v) => $"{p.ToSql()} ON {v}",
-            GroupBy(var p, var v) => $"{p.ToSql()} GROUP BY {v}",
-            Having(var p, var v) => $"{p.ToSql()} HAVING {v}",
+            From(var p, var t) => $"{p.ToSql()} FROM {t}",
+            Where(var p, var c) => $"{p.ToSql()} WHERE {c}",
+            OrderBy(var p, var c) => AppendOrderBy(p.ToSql(), c),
+            OrderByAsc(var p, var c) => AppendOrderBy(p.ToSql(), c, true),
+            OrderByDesc(var p, var c) => AppendOrderBy(p.ToSql(), c, false),
+            InnerJoin(var p, var t) => $"{p.ToSql()} INNER JOIN {t}",
+            LeftJoin(var p, var t) => $"{p.ToSql()} LEFT JOIN {t}",
+            RightJoin(var p, var t) => $"{p.ToSql()} RIGHT JOIN {t}",
+            FullOuterJoin(var p, var t) => $"{p.ToSql()} FULL OUTER JOIN {t}",
+            On(var p, var c) => $"{p.ToSql()} ON {c}",
+            GroupBy(var p, var c) => $"{p.ToSql()} GROUP BY {c}",
+            Having(var p, var c) => $"{p.ToSql()} HAVING {c}",
             Union(var p) => $"{p.ToSql()} UNION",
             _ => throw new NotImplementedException(nameof(self))
         };
