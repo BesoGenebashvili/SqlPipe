@@ -1,5 +1,4 @@
 ﻿using System.Data;
-using static Clause;
 using static Extensions;
 
 #nullable disable
