@@ -1,128 +1,7 @@
 ﻿using System.Data;
-using System.Data.SqlClient;
 using System.Transactions;
+using System.Data.SqlClient;
 using static Clause;
-using static Extensions;
-
-#nullable enable
-
-var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
-
-var sql = SELECT().FROM("dbo.USERS")
-                  .WHERE("USERNAME = @username")
-                  .GROUP_BY("USERNAME")
-                  .HAVING("ID = @id")
-                  .ORDER_BY("ID")
-                  .ToPrettySql();
-
-var results = await executor.QueryAsync(
-    sql,
-    SqlParams(
-        SqlParam("@username", "saba"),
-        SqlParam("@id", 1)),
-    x => new
-    {
-        Id = x.GetValueAs<int>("ID"),
-        Username = x.GetValueAs<string>("USERNAME"),
-        Password = x.GetValueAs<string>("PASSWORD")
-    });
-
-Console.WriteLine(
-    string.Join('\n', results));
-
-//await executor.INSERT_INTO(
-//    "dbo.USERS",
-//    SqlParams(
-//        SqlParam("@username", "saba", "USERNAME"),
-//        SqlParam("@pass", "saba123", "PASSWORD")));
-
-//await executor.TextAsync(
-//    @"
-//CREATE TABLE dbo.USERS(
-//ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
-//USERNAME VARCHAR(100) NOT NULL,
-//PASSWORD VARCHAR(100) NOT NULL)");
-
-//await executor.TextAsync(
-//    @"
-//CREATE TABLE dbo.TODOS(
-//ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
-//USER_ID INT NOT NULL FOREIGN KEY REFERENCES USERS(ID),
-//TITLE VARCHAR(100) NOT NULL,
-//DESCRIPTION VARCHAR(MAX) NOT NULL,
-//IS_DONE BIT NOT NULL,
-//CATEGORY TINYINT NOT NULL,
-//NOTE VARCHAR(MAX) NOT NULL)");
-
-//await executor.TextAsync(
-//    @"
-//CREATE TABLE dbo.TODO_FILES(
-//ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
-//TODO_ID INT NOT NULL FOREIGN KEY REFERENCES TODOS(ID),
-//PATH VARCHAR(200) NOT NULL)");
-
-//var age = 18;
-//var amount = 200;
-
-//var customers = await executor.QueryAsync(
-//    SELECT(
-//        "C.ID as CustomerId",
-//        "C.FIRST_NAME as CustomerName",
-//        "L.ID as LoanId",
-//        "L.AMOUNT as LoanAmount",
-//        "L.PMT as LoanPmt")
-//      .FROM("dbo.CLIENTS as C")
-//      .INNER_JOIN("dbo.LOANS as L")
-//      .ON("C.ID = L.CLIENT_ID")
-//      .WHERE("C.AGE > @age AND L.AMOUNT > @amount")
-//      .ToSql(),
-//    SqlParams(
-//        SqlParam("@age", age),
-//        SqlParam("@amount", amount)),
-//    r => new
-//    {
-//        CustomerId = r.GetValueAs<int>("CustomerId"),
-//        CustomerName = r.GetValueAs<string>("CustomerName"),
-//        LoanId = r.GetValueAs<int>("LoanId"),
-//        LoanAmount = r.GetValueAs<decimal>("LoanAmount"),
-//        LoanPmt = r.GetValueAsNullable<decimal>("LoanPmt")
-//    });
-
-
-//Console.WriteLine(string.Join('\n', customers));
-
-//executor.INSERT_INTO(
-//    "dbo.LOANS",
-//    new SqlParameter[]
-//    {
-//        new("CLIENT_ID", 4),
-//        new("AMOUNT", 130m),
-//        new("TERM_BEGIN", new DateTime(2022, 5, 1)),
-//        new("TERM_END", new DateTime(2022, 7, 1))
-//    });
-
-//var clients = executor.Query(
-//    SELECT().FROM("dbo.CLIENTS")
-//            .ToSql(),
-//    r => new
-//    {
-//        Id = r.GetValueAs<int>("ID"),
-//        Name = r.GetValueAs<string>("FIRST_NAME"),
-//        Age = r.GetValueAs<byte>("AGE")
-//    });
-
-//Console.WriteLine(string.Join('\n', clients));
-
-//executor.UPDATE(
-//    "dbo.CLIENTS",
-//    new SqlParameter[]
-//    {
-//        new("FIRST_NAME", "B")
-//    },
-//    "ID = 6");
-
-
-//Console.WriteLine("Hello, World!");
 
 public sealed class Executor
 {
@@ -150,7 +29,6 @@ public sealed class Executor
         string command,
         CommandBehavior commandBehavior,
         SqlParameter[] sqlParameters,
-
         Func<IDataReader, TResult> map)
     {
         using var sqlConnection = new SqlConnection(_connectionString);
@@ -271,7 +149,7 @@ VALUES ({string.Join(',', inputParams.Select(p => p.ParameterName))})
         self.TextAsync(
             $@"
 UPDATE {tableName}
-SET {string.Join(',', sqlParameters.Select(p => $"{p.SourceColumn} = {p.ParameterName}"))}
+SET {string.Join(',', sqlParameters.Where(p => !string.IsNullOrWhiteSpace(p.SourceColumn)).Select(p => $"{p.SourceColumn} = {p.ParameterName}"))}
 WHERE {where}",
             sqlParameters);
 
