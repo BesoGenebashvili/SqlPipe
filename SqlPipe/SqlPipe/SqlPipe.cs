@@ -1,7 +1,9 @@
 ﻿using System.Data;
 using System.Transactions;
 using System.Data.SqlClient;
-using static Clause;
+using static SqlPipe.Clause;
+
+namespace SqlPipe;
 
 public sealed class Executor
 {
@@ -282,15 +284,15 @@ WHERE {where}",
 
     public static string ToPrettySql(this Clause self) =>
         new[] { "FROM",
-                "WHERE",
-                "ORDER BY",
-                "INNER JOIN",
-                "LEFT JOIN",
-                "RIGHT JOIN",
-                "FULL OUTER JOIN",
-                "ON",
-                "GROUP BY",
-                "UNION" }
+            "WHERE",
+            "ORDER BY",
+            "INNER JOIN",
+            "LEFT JOIN",
+            "RIGHT JOIN",
+            "FULL OUTER JOIN",
+            "ON",
+            "GROUP BY",
+            "UNION" }
             .Aggregate(
                 self.ToSql(),
                 (acc, item) => acc.Contains(item) ? acc.Replace(item, '\n' + item) : acc);

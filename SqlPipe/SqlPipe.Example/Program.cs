@@ -1,5 +1,7 @@
 ﻿using System.Data;
-using static Extensions;
+using SqlPipe;
+
+using static SqlPipe.Extensions;
 
 #nullable disable
 
