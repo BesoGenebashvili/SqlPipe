@@ -135,10 +135,19 @@ public static class Extensions
     {
         var inputParams = sqlParameters.Where(p => p.Direction == ParameterDirection.Input);
 
-        var sql = $@"
-INSERT INTO {tableName} ({string.Join(',', inputParams.Select(p => p.SourceColumn))})
-VALUES ({string.Join(',', inputParams.Select(p => p.ParameterName))})
-{(sqlParameters.Any(p => p.ParameterName == "@IDENTITY") ? "SET @IDENTITY = SCOPE_IDENTITY()" : string.Empty)};";
+        var columns = string.Join(',', inputParams.Select(p => p.SourceColumn));
+        var values = string.Join(',', inputParams.Select(p => p.ParameterName));
+
+        var identity = sqlParameters.Any(p => p.ParameterName == "@IDENTITY")
+                                    ? "SET @IDENTITY = SCOPE_IDENTITY()"
+                                    : string.Empty;
+
+        var sql =
+            $"""
+             INSERT INTO {tableName} ({columns})
+             VALUES ({values})
+             {identity}
+             """;
 
         return self.TextAsync(sql, sqlParameters);
     }
@@ -147,13 +156,22 @@ VALUES ({string.Join(',', inputParams.Select(p => p.ParameterName))})
         this Executor self,
         string tableName,
         SqlParameter[] sqlParameters,
-        string where) =>
-        self.TextAsync(
-            $@"
-UPDATE {tableName}
-SET {string.Join(',', sqlParameters.Where(p => !string.IsNullOrWhiteSpace(p.SourceColumn)).Select(p => $"{p.SourceColumn} = {p.ParameterName}"))}
-WHERE {where}",
-            sqlParameters);
+        string where)
+    {
+        var columns = string.Join(
+            ',',
+            sqlParameters.Where(p => !string.IsNullOrWhiteSpace(p.SourceColumn))
+                         .Select(p => $"{p.SourceColumn} = {p.ParameterName}"));
+
+        var sql =
+            $"""
+             UPDATE {tableName}
+             SET {columns}
+             WHERE {where}
+             """;
+
+        return self.TextAsync(sql, sqlParameters);
+    }
 
     public static Task<bool> DELETE_FROM(
         this Executor self,
@@ -161,7 +179,10 @@ WHERE {where}",
         SqlParameter[] sqlParameters,
         string where) =>
         self.TextAsync(
-            $"DELETE FROM {tableName} WHERE {where}",
+            $"""
+             DELETE FROM {tableName} 
+             WHERE {where}
+             """,
             sqlParameters);
 
     #endregion
@@ -323,7 +344,7 @@ WHERE {where}",
 
     private static SqlParameter SqlParam(
         string parameterName,
-        object value,
+        object? value,
         DbType dbType,
         string? sourceColumn = null) =>
         new()
@@ -332,18 +353,20 @@ WHERE {where}",
             Value = value,
             DbType = dbType,
             SourceColumn = sourceColumn,
+            IsNullable = value is null,
+            Direction = ParameterDirection.Input
         };
 
     public static SqlParameter SqlOutParam(string parameterName, SqlDbType dbType) => new(parameterName, dbType) { Direction = ParameterDirection.Output };
-    public static SqlParameter SqlParam(string parameterName, bool value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Boolean, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, byte value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Byte, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, short value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int16, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, int value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int32, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, long value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int64, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, float value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Double, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, double value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Double, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, decimal value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Decimal, sourceColumn);
-    public static SqlParameter SqlParam(string parameterName, string value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.String, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, bool? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Boolean, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, byte? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Byte, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, short? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int16, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, int? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int32, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, long? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Int64, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, float? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Double, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, double? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Double, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, decimal? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Decimal, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, string? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.String, sourceColumn);
 
     #endregion
 }
