@@ -6,23 +6,24 @@ using static SqlPipe.Extensions;
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
 // Create database
-await executor.TextAsync(@"
-IF NOT EXISTS(SELECT * FROM sysobjects WHERE name='CLIENTS' AND xtype = 'U')
+await executor.TextAsync(
+    """ 
     CREATE TABLE dbo.CLIENTS(
-        ID INT NOT NULL IDENTITY(1, 1) PRIMARY KEY,
+        ID         INT          NOT NULL IDENTITY(1, 1) PRIMARY KEY,
         FIRST_NAME VARCHAR(100) NOT NULL,
-        LAST_NAME VARCHAR(100) NOT NULL,
-        AGE TINYINT NULL,
-        IS_ACTIVE BIT NOT NULL)");
+        LAST_NAME  VARCHAR(100) NOT NULL,
+        AGE        TINYINT      NULL,
+        IS_ACTIVE  BIT          NOT NULL);
+    """);
 
 // Insert
 var clientIdOutParam = SqlOutParam("@IDENTITY", SqlDbType.Int);
 var inserted = await executor.INSERT_INTO(
                           "dbo.CLIENTS",
                           SqlParams(
-                              SqlParam("@firstName", "giorgi", "FIRST_NAME"),
-                              SqlParam("@lastName", "giorgadze", "LAST_NAME"),
-                              SqlParam("@age", 10, "AGE"),
+                              SqlParam("@firstName", "Beso", "FIRST_NAME"),
+                              SqlParam("@lastName", "Genebashvili", "LAST_NAME"),
+                              SqlParam("@age", 24, "AGE"),
                               SqlParam("@isActive", true, "IS_ACTIVE"),
                               clientIdOutParam));
 
@@ -33,8 +34,8 @@ else Console.WriteLine("Insert was unsuccessful");
 var updated = await executor.UPDATE(
                         "dbo.CLIENTS",
                         SqlParams(
-                            SqlParam("@age", 15, "AGE"),
-                            SqlParam("@id", 1)),
+                            SqlParam("@id", 1),
+                            SqlParam("@age", 15, "AGE")),
                         "Id = @id");
 
 if (updated) Console.WriteLine($"Updated client `{1}`");
@@ -73,8 +74,7 @@ var queryListSql = SELECT("*", "FIRST_NAME + ' ' + LAST_NAME as FULL_NAME")
 var list = await executor.QueryAsync(
                      queryListSql,
                      SqlParams(
-                         SqlParam("isActive", true),
-                         SqlParam("@idCount", 5)),
+                         SqlParam("isActive", true)),
                      r => new
                      {
                          Id = r.GetValueAs<int>("ID"),
