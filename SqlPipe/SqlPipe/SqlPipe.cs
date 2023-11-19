@@ -5,12 +5,9 @@ using static SqlPipe.Clause;
 
 namespace SqlPipe;
 
-public sealed class Executor
+public sealed class Executor(string connectionString)
 {
-    private readonly string _connectionString;
-
-    public Executor(string connectionString) =>
-        _connectionString = connectionString;
+    private readonly string _connectionString = connectionString;
 
     private async Task<bool> ExecuteNonQueryAsync(
         string command,
@@ -114,16 +111,16 @@ public static class Extensions
         this Executor self,
         string sql,
         Func<IDataRecord, TResult> map) =>
-        self.QuerySingleAsync(sql, Array.Empty<SqlParameter>(), map);
+        self.QuerySingleAsync(sql, [], map);
 
     public static Task<List<TResult>> QueryAsync<TResult>(
         this Executor self,
         string sql,
         Func<IDataRecord, TResult> map) =>
-        self.QueryAsync(sql, Array.Empty<SqlParameter>(), map);
+        self.QueryAsync(sql, [], map);
 
     /// <summary>
-    /// executes 'INSERT INTO' command
+    /// Executes 'INSERT INTO' command. Provide '@IDENTITY' output parameter for last identity.
     /// </summary>
     /// <param name="tableName">Table name</param>
     /// <param name="sqlParameters">Provide '@IDENTITY' output parameter for last identity</param>
@@ -304,7 +301,9 @@ public static class Extensions
     }
 
     public static string ToPrettySql(this Clause self) =>
-        new[] { "FROM",
+        new[]
+        { 
+            "FROM",
             "WHERE",
             "ORDER BY",
             "INNER JOIN",
@@ -313,10 +312,11 @@ public static class Extensions
             "FULL OUTER JOIN",
             "ON",
             "GROUP BY",
-            "UNION" }
-            .Aggregate(
-                self.ToSql(),
-                (acc, item) => acc.Contains(item) ? acc.Replace(item, '\n' + item) : acc);
+            "UNION" 
+        }
+        .Aggregate(
+            self.ToSql(),
+            (acc, item) => acc.Contains(item) ? acc.Replace(item, '\n' + item) : acc);
 
     #endregion
 
@@ -367,6 +367,7 @@ public static class Extensions
     public static SqlParameter SqlParam(string parameterName, double? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Double, sourceColumn);
     public static SqlParameter SqlParam(string parameterName, decimal? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.Decimal, sourceColumn);
     public static SqlParameter SqlParam(string parameterName, string? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.String, sourceColumn);
+    public static SqlParameter SqlParam(string parameterName, DateTime? value, string? sourceColumn = null) => SqlParam(parameterName, value, DbType.DateTime, sourceColumn);
 
     #endregion
 }

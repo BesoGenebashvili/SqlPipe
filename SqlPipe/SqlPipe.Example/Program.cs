@@ -3,8 +3,6 @@ using SqlPipe;
 
 using static SqlPipe.Extensions;
 
-#nullable disable
-
 var executor = new Executor("data source=DESKTOP-5R95BQP;initial catalog=Test;trusted_connection=true");
 
 // Create database
